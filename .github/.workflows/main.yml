@@ -1,0 +1,98 @@
+name: Gradle Build and Release
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # 允许创建 release 和上传 asset
+    if: contains(github.event.head_commit.message, '#build') || contains(github.event.head_commit.message, '#releases')
+    env:
+      JAVA_VERSION: 8
+      GRADLE_USER_HOME: ~/.gradle
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'adopt'
+          cache: 'gradle'
+
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle.kts', '**/gradle-wrapper.properties') }}
+
+      - name: Extract version from commit message
+        if: contains(github.event.head_commit.message, '#releases')
+        id: extract_version
+        run: |
+          VERSION=$(echo "${{ github.event.head_commit.message }}" | grep -o '#releases #v[0-9.]\+\(-[a-zA-Z0-9]\+\)\?' | grep -o 'v[0-9.]\+\(-[a-zA-Z0-9]\+\)\?' | head -1)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "short_version=${VERSION#v}" >> $GITHUB_OUTPUT
+          # 判断是否为预发布（只要带有-后缀的都算）
+          if echo "$VERSION" | grep -q -- '-'; then
+            echo "is_prerelease=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_prerelease=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Update gradle.properties with new version
+        if: contains(github.event.head_commit.message, '#releases')
+        run: |
+          sed -i "s/^version=.*/version=${{ steps.extract_version.outputs.short_version }}/g" gradle.properties
+          cat gradle.properties
+
+      - name: Grant executable permissions to Gradle wrapper
+        run: chmod +x ./gradlew
+
+      - name: Clean and Build with Gradle
+        run: ./gradlew clean build
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts
+          path: build/libs/*.jar
+
+      - name: Generate changelog
+        if: contains(github.event.head_commit.message, '#releases')
+        id: changelog
+        run: |
+          LAST_RELEASE=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$LAST_RELEASE" ]; then
+            LOG=$(git log $LAST_RELEASE..HEAD --pretty=format:"- %s (%h)")
+          else
+            LOG=$(git log --pretty=format:"- %s (%h)")
+          fi
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          echo "$LOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Release with softprops/action-gh-release
+        if: contains(github.event.head_commit.message, '#releases')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.extract_version.outputs.version }}
+          name: Release ${{ steps.extract_version.outputs.version }}
+          body: |
+            **更新内容:**
+            ${{ steps.changelog.outputs.changelog }}
+          draft: false
+          prerelease: ${{ steps.extract_version.outputs.is_prerelease == 'true' }}
+          files: build/libs/*.jar
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

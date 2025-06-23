@@ -1,0 +1,8 @@
+load: "正在尝试进行加载..."
+loaded: "加载完成"
+active: "正在尝试进行激活..."
+activated: "激活完成"
+enable: "正在尝试进行启用..."
+enabled: "启用完成"
+disable: "正在尝试进行禁用..."
+disabled: "禁用完成"
