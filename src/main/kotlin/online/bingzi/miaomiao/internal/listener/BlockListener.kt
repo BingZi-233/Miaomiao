@@ -6,7 +6,7 @@ import taboolib.common.platform.event.SubscribeEvent
 
 object BlockListener {
     @SubscribeEvent
-    fun onPlayerInteractEvent(event: PlayerInteractEvent){
+    fun onPlayerInteractEvent(event: PlayerInteractEvent) {
         event.clickedBlock?.type?.let {
             if (BlockConfig.noInteraction.contains(it)) {
                 event.isCancelled = true
